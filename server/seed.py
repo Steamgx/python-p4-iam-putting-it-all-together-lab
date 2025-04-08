@@ -1,63 +1,50 @@
-#!/usr/bin/env python3
+from sqlalchemy.ext.hybrid import hybrid_property
+from sqlalchemy_serializer import SerializerMixin
 
-from random import randint, choice as rc
+from config import db, bcrypt
 
-from faker import Faker
+class User(db.Model, SerializerMixin):
+    __tablename__ = 'users'
 
-from app import app
-from models import db, Recipe, User
+    serialize_rules = ('-recipes.user', '-_password_hash',)
 
-fake = Faker()
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String, unique=True, nullable=False)
+    _password_hash = db.Column(db.String)
+    image_url = db.Column(db.String)
+    bio = db.Column(db.String)
 
-with app.app_context():
+    recipes = db.relationship('Recipe', backref='user')
 
-    print("Deleting all records...")
-    Recipe.query.delete()
-    User.query.delete()
+    @hybrid_property
+    def password_hash(self):
+        raise AttributeError('Password hashes may not be viewed.')
 
-    fake = Faker()
+    @password_hash.setter
+    def password_hash(self, password):
+        password_hash = bcrypt.generate_password_hash(
+            password.encode('utf-8'))
+        self._password_hash = password_hash.decode('utf-8')
 
-    print("Creating users...")
+    def authenticate(self, password):
+        return bcrypt.check_password_hash(
+            self._password_hash, password.encode('utf-8'))
 
-    # make sure users have unique usernames
-    users = []
-    usernames = []
+    def __repr__(self):
+        return f'<User {self.username}>'
 
-    for i in range(20):
-        
-        username = fake.first_name()
-        while username in usernames:
-            username = fake.first_name()
-        usernames.append(username)
+class Recipe(db.Model, SerializerMixin):
+    __tablename__ = 'recipes'
+    __table_args__ = (
+        db.CheckConstraint('length(instructions) >= 50'),
+    )
 
-        user = User(
-            username=username,
-            bio=fake.paragraph(nb_sentences=3),
-            image_url=fake.url(),
-        )
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String, nullable=False)
+    instructions = db.Column(db.String, nullable=False)
+    minutes_to_complete = db.Column(db.Integer)
 
-        user.password_hash = user.username + 'password'
+    user_id = db.Column(db.Integer(), db.ForeignKey('users.id'))
 
-        users.append(user)
-
-    db.session.add_all(users)
-
-    print("Creating recipes...")
-    recipes = []
-    for i in range(100):
-        instructions = fake.paragraph(nb_sentences=8)
-        
-        recipe = Recipe(
-            title=fake.sentence(),
-            instructions=instructions,
-            minutes_to_complete=randint(15,90),
-        )
-
-        recipe.user = rc(users)
-
-        recipes.append(recipe)
-
-    db.session.add_all(recipes)
-    
-    db.session.commit()
-    print("Complete.")
+    def __repr__(self):
+        return f'<Recipe {self.id}: {self.title}>'
